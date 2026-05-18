@@ -153,9 +153,162 @@ library(ggplot2)
 
 heatmap.2(assay(vsd), trace="none", col=bluered(100))
 
+
+# Enrichment analysis packages
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install(c(
+  "clusterProfiler",
+  "org.Hs.eg.db",
+  "ReactomePA",
+  "enrichplot",
+  "DOSE"
+))
+
+install.packages(c("ggplot2", "dplyr"))
+
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(ReactomePA)
+library(enrichplot)
+library(DOSE)
+library(dplyr)
+
 res <- results(dds)
 res_sig <- res[which(res$padj < 0.05 & abs(res$log2FoldChange) > 1), ]
 
+# =========================
+# ENRICHMENT ANALYSIS
+# =========================
+
+# Remove NA values
+res_df <- as.data.frame(res)
+res_df <- na.omit(res_df)
+
+# Add gene symbols
+res_df$gene <- rownames(res_df)
+
+# Select significantly differentially expressed genes
+sig_genes <- res_df %>%
+  filter(padj < 0.05 & abs(log2FoldChange) > 1)
+
+# Convert gene symbols to ENTREZ IDs
+gene_conversion <- bitr(
+  sig_genes$gene,
+  fromType = "SYMBOL",
+  toType = "ENTREZID",
+  OrgDb = org.Hs.eg.db
+)
+
+# Extract ENTREZ IDs
+entrez_genes <- gene_conversion$ENTREZID
+
+# =========================
+# GO ENRICHMENT
+# =========================
+
+go_bp <- enrichGO(
+  gene = entrez_genes,
+  OrgDb = org.Hs.eg.db,
+  ont = "BP",
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.05,
+  qvalueCutoff = 0.05,
+  readable = TRUE
+)
+
+go_cc <- enrichGO(
+  gene = entrez_genes,
+  OrgDb = org.Hs.eg.db,
+  ont = "CC",
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.05,
+  readable = TRUE
+)
+
+go_mf <- enrichGO(
+  gene = entrez_genes,
+  OrgDb = org.Hs.eg.db,
+  ont = "MF",
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.05,
+  readable = TRUE
+)
+
+# =========================
+# KEGG PATHWAY ANALYSIS
+# =========================
+
+kegg_results <- enrichKEGG(
+  gene = entrez_genes,
+  organism = "hsa",
+  pvalueCutoff = 0.05
+)
+
+# Convert KEGG IDs to readable gene names
+kegg_results <- setReadable(
+  kegg_results,
+  OrgDb = org.Hs.eg.db,
+  keyType = "ENTREZID"
+)
+
+# =========================
+# REACTOME PATHWAY ANALYSIS
+# =========================
+
+reactome_results <- enrichPathway(
+  gene = entrez_genes,
+  organism = "human",
+  pvalueCutoff = 0.05,
+  readable = TRUE
+)
+
+# =========================
+# VISUALIZATION
+# =========================
+
+# GO Biological Process
+barplot(go_bp, showCategory = 10)
+
+dotplot(go_bp, showCategory = 10)
+
+# KEGG
+barplot(kegg_results, showCategory = 10)
+
+dotplot(kegg_results, showCategory = 10)
+
+# Reactome
+barplot(reactome_results, showCategory = 10)
+
+dotplot(reactome_results, showCategory = 10)
+
+# Enrichment Map
+emapplot(pairwise_termsim(go_bp))
+
+# Category-Gene Network
+cnetplot(go_bp, categorySize = "pvalue")
+
+# =========================
+# SAVE RESULTS
+# =========================
+
+write.csv(as.data.frame(go_bp),
+          "GO_BP_Enrichment.csv")
+
+write.csv(as.data.frame(go_cc),
+          "GO_CC_Enrichment.csv")
+
+write.csv(as.data.frame(go_mf),
+          "GO_MF_Enrichment.csv")
+
+write.csv(as.data.frame(kegg_results),
+          "KEGG_Enrichment.csv")
+
+write.csv(as.data.frame(reactome_results),
+          "Reactome_Enrichment.csv")
+
+#volcano plot
 volcano <- ggplot(as.data.frame(res), aes(x=log2FoldChange, y=-log10(pvalue))) +
   geom_point(aes(color = padj < 0.05), alpha = 0.5) +
   theme_minimal() + labs(x="log2 Fold Change", y="-log10(p-value)")
